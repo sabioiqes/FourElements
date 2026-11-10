@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四大元素ゲーム 音方式 段階1テスト — フレーム送信</title>
+<style>
+  body { font-family: sans-serif; max-width: 760px; margin: 0 auto; padding: 16px; line-height: 1.6; color: #222; }
+  h1 { font-size: 1.3em; }
+  h2 { font-size: 1.1em; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-top: 28px; }
+  .card { border: 1px solid #bbb; border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .sender { border-color: #2a7; }
+  .receiver { border-color: #27a; }
+  button { font-size: 1em; padding: 8px 12px; margin: 4px 4px 4px 0; border-radius: 6px; border: 1px solid #888; background: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #e8f4ff; border-color: #27a; }
+  button.go { background: #e6f7ec; border-color: #2a7; }
+  button.sel { background: #333; color: #fff; }
+  select, input { font-size: 1em; padding: 6px; margin: 2px 6px 2px 0; }
+  #status, #rxStatus { min-height: 1.5em; font-weight: bold; }
+  #summary { font-weight: bold; }
+  table { border-collapse: collapse; width: 100%; font-size: .9em; margin-top: 8px; }
+  th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: center; }
+  th { background: #f2f2f2; }
+  .ok { color: #0a7; font-weight: bold; }
+  .ng { color: #c33; font-weight: bold; }
+  .note { font-size: .9em; color: #555; }
+  ol li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<h1>四大元素ゲーム 音方式 段階1テスト — フレーム送信</h1>
+<p>実験計画 v0.1 の段階1。段階0で「音が届く」ことは確かめたので、ここでは仕様 v0.1 の実寸に近い短いフレームを送って、「初回で届く割合」と「1回あたりの時間」を測る。同じファイルを2台の端末で開き、片方を送信側、片方を受信側にする。</p>
+<p class="note">段階0の結果（2026-11-10、Pixel＋Chromebook、0.5m・手に持つ・音量100%）: 17,500〜19,200Hz は SNR 87〜90dB で全帯域「届く」。20,000Hz も届くがノイズ床の挙動が他と違う（SNR 39.9dB）。16,500Hz は数値上は届くがユウトの耳に「脳に刺さる」感じがあり、快適さの時点で候補から外す。2,000Hz は純粋にうるさい。だから段階1の本命は <b>18,500〜19,200Hz</b>。ここでは 17,500 / 18,500 / 19,200 / 20,000Hz を選べる。</p>
+
+<h2>使い方</h2>
+<ol>
+  <li>両方の端末で、下の条件（帯域・距離・置き方・音量）と端末名を同じ値に合わせる。送る向き（どちらが送信側か）もここに記録する。段階0では向きが未記録だったので、今回は必ず書くこと。</li>
+  <li>受信側で「マイク開始」を押し、許可する。続けて「周囲の静けさを測る」でノイズの基準を取る。</li>
+  <li>受信側で「自動受信開始（20試行）」を押す（音を待つ状態になる）。</li>
+  <li>送信側で「自動送信開始（20試行）」を押す。1試行は約1.5秒のフレームで、20試行で約1分。</li>
+  <li>受信側の結果表に、試行ごとの成功・失敗と所要時間が出る。判定の目安は、初回成功率 95%以上（20回中19回以上）かつ、1戦分（4フレームの往復）の推定が中央値で 8秒以内。</li>
+  <li>1試行だけ確かめたいときは、手動テスト（送信で手を選んで1回送る→受信で「1フレーム待つ」）を使う。</li>
+</ol>
+<p class="note">マイクを使うには https か localhost が必要。file:// で直接開くとマイクが使えないブラウザがある。このファイルは GitHub Pages（FourElements リポジトリ）に置く想定。同じ端末1台で送信と受信を両方やる自己テストは、スピーカーとマイクが近すぎて正確な測定にならない。必ず2台で測ること。フレームの中身は測定用の符号で、暗号化はしていない（段階3の通し実験で入れる）。</p>
+
+<h2>条件（両端末で同じ値にする）</h2>
+<div class="card">
+  <label>帯域（中心周波数）
+    <select id="condBand">
+      <option value="17500">17,500 Hz</option>
+      <option value="18500" selected>18,500 Hz（本命）</option>
+      <option value="19200">19,200 Hz（本命）</option>
+      <option value="20000">20,000 Hz</option>
+    </select>
+  </label>
+  <label>距離
+    <select id="condDist">
+      <option value="0.5m">0.5m（机を挟んだ対戦の想定）</option>
+      <option value="1m">1m</option>
+      <option value="2m">2m</option>
+    </select>
+  </label>
+  <label>置き方
+    <select id="condPlace">
+      <option value="机に置く">机に置く</option>
+      <option value="手に持つ">手に持つ</option>
+    </select>
+  </label>
+  <label>音量
+    <select id="condVol">
+      <option value="50%">50%</option>
+      <option value="75%">75%</option>
+      <option value="100%" selected>100%</option>
+    </select>
+  </label>
+  <br>
+  <label>送信側の端末 <input id="condTx" type="text" value="Pixel" size="12"></label>
+  <label>受信側の端末 <input id="condRx" type="text" value="Chromebook" size="12"></label>
+</div>
+
+<h2>送信側</h2>
+<div class="card sender">
+  <div>送る手（手動テスト用）：</div>
+  <div id="handBtns"></div>
+  <button id="sendOnce" class="go">この手で1フレーム送る（約1.5秒）</button>
+  <button id="autoSend" class="go">自動送信開始（20試行・約1分）</button>
+  <div id="status"></div>
+  <p class="note">フレームの形: 開始音（中心周波数・0.4秒）→ 間隔 0.06秒 → 12ビットを2音FSKで送る（1ビット 0.08秒）。12ビットの中身は、試行番号 5ビット＋手 2ビット＋検査値 5ビット（全ビットを検査値が覆うので、1ビットの誤りは必ず検出できる）。2音は中心±400Hz（例: 18,500Hz なら 18,100Hz が 0、18,900Hz が 1）。終わりに中心周波数 0.12秒の終了音。</p>
+</div>
+
+<h2>受信側</h2>
+<div class="card receiver">
+  <button id="micStart" class="primary">マイク開始</button>
+  <button id="measureBase" class="primary" disabled>周囲の静けさを測る（1秒）</button>
+  <button id="recvOnce" class="primary" disabled>1フレーム待つ（最大8秒）</button>
+  <button id="autoRecv" class="primary" disabled>自動受信開始（20試行）</button>
+  <div id="rxStatus"></div>
+  <div>開始音のいまの強さ：<span id="liveDb">—</span></div>
+  <p class="note">ノイズ抑制などの自動加工は切って取得する（ブラウザが対応している範囲で）。表示の dB は端末内の相対値で、絶対音量ではない。成功の判定は「試行番号が期待通り」かつ「検査値が合う」こと。手が違って見えたら、それは復号の失敗として数える。</p>
+</div>
+
+<h2>結果</h2>
+<div id="summary">まだ結果はありません。</div>
+<table id="resultTable">
+  <thead><tr><th>時刻</th><th>試行</th><th>帯域</th><th>送信した手</th><th>受信した手</th><th>検査値</th><th>成功</th><th>所要時間</th></tr></thead>
+  <tbody></tbody>
+</table>
+<button id="copyResults">結果をテキストでコピー</button>
+<button id="csvResults">CSVで保存</button>
+<button id="clearResults">結果を消す</button>
+
+<script>
+"use strict";
+// ---- frame format ----
+// 12 bits: seq(5, MSB first) + hand(2) + checksum(5)
+// checksum = (seq * 3 ^ hand * 5 ^ 0x12) & 0x1F — covers every bit, so any single-bit flip is caught
+const HANDS = ["水", "火", "風", "地"];
+const BIT_MS = 80, PREAMBLE_MS = 400, GAP_MS = 60, END_MS = 120;
+const TRIALS = 20;
+let selHand = 1; // 火
+let txCtx = null;
+let rxCtx = null, analyser = null, micStream = null;
+let baseline = {}; // freq -> noise dB
+let results = [];
+let scanning = false;
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const nowTime = () => new Date().toLocaleTimeString("ja-JP", {hour12: false});
+const toDb = v => v <= 0 ? -90 : Math.round(20 * Math.log10(v / 255) * 10) / 10;
+const median = a => { const s = [...a].sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
+
+function band() { return parseInt($("condBand").value, 10); }
+function f0() { return band() - 400; }
+function f1() { return band() + 400; }
+function condVol() { return parseInt($("condVol").value, 10) / 100; }
+function conds() {
+  return { band: band(), dist: $("condDist").value, place: $("condPlace").value,
+           vol: $("condVol").value, tx: $("condTx").value, rx: $("condRx").value };
+}
+function checksum(seq, hand) { return (seq * 3 ^ hand * 5 ^ 0x12) & 0x1F; }
+function encodeFrame(seq, hand) {
+  const bits = [];
+  for (let i = 4; i >= 0; i--) bits.push((seq >> i) & 1);
+  bits.push((hand >> 1) & 1, hand & 1);
+  const c = checksum(seq, hand);
+  for (let i = 4; i >= 0; i--) bits.push((c >> i) & 1);
+  return bits; // 12 bits
+}
+function decodeBits(bits) {
+  let seq = 0;
+  for (let i = 0; i < 5; i++) seq = (seq << 1) | bits[i];
+  const hand = (bits[5] << 1) | bits[6];
+  const c = (bits[7] << 4) | (bits[8] << 3) | (bits[9] << 2) | (bits[10] << 1) | bits[11];
+  return { seq, hand, checksumOk: c === checksum(seq, hand), checksum: c };
+}
+
+// ---- hand buttons ----
+const handDiv = $("handBtns");
+HANDS.forEach((h, i) => {
+  const b = document.createElement("button");
+  b.textContent = h;
+  b.dataset.h = i;
+  b.onclick = () => { selHand = i; refreshHandBtns(); };
+  handDiv.appendChild(b);
+});
+function refreshHandBtns() {
+  [...handDiv.children].forEach(b => b.classList.toggle("sel", +b.dataset.h === selHand));
+}
+refreshHandBtns();
+
+// ---- sender ----
+function ensureTx() {
+  if (!txCtx) txCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (txCtx.state === "suspended") txCtx.resume();
+  return txCtx;
+}
+function toneAt(ctx, freq, start, dur, vol) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  g.gain.setValueAtTime(0, start);
+  g.gain.linearRampToValueAtTime(vol, start + 0.005);
+  g.gain.setValueAtTime(vol, start + dur - 0.01);
+  g.gain.linearRampToValueAtTime(0, start + dur);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(start);
+  osc.stop(start + dur + 0.05);
+}
+function sendFrame(seq, hand) {
+  const ctx = ensureTx();
+  const vol = condVol();
+  const bits = encodeFrame(seq, hand);
+  let t = ctx.currentTime + 0.05;
+  toneAt(ctx, band(), t, PREAMBLE_MS / 1000, vol);
+  t += (PREAMBLE_MS + GAP_MS) / 1000;
+  for (const bit of bits) {
+    toneAt(ctx, bit ? f1() : f0(), t, BIT_MS / 1000, vol);
+    t += BIT_MS / 1000;
+  }
+  toneAt(ctx, band(), t, END_MS / 1000, vol);
+  return bits;
+}
+$("sendOnce").onclick = async () => {
+  $("status").textContent = "送信中: 試行0・手 " + HANDS[selHand] + "（" + band().toLocaleString() + " Hz）";
+  sendFrame(0, selHand);
+  await sleep(1700);
+  $("status").textContent = "送信しました。受信側の結果を確認してください。";
+};
+$("autoSend").onclick = async () => {
+  if (scanning) return;
+  scanning = true;
+  $("autoSend").disabled = true; $("sendOnce").disabled = true;
+  for (let seq = 0; seq < TRIALS; seq++) {
+    const hand = Math.floor(Math.random() * 4);
+    $("status").textContent = "送信中: 試行 " + (seq + 1) + " / " + TRIALS + "・手 " + HANDS[hand];
+    sendFrame(seq, hand);
+    await sleep(2600);
+  }
+  $("status").textContent = "自動送信完了（20試行）。受信側の結果表を確認してください。";
+  scanning = false;
+  $("autoSend").disabled = false; $("sendOnce").disabled = false;
+};
+
+// ---- receiver ----
+function binOf(freq) {
+  return Math.round(freq * analyser.fftSize / rxCtx.sampleRate);
+}
+function levelAt(freq) {
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  const b = binOf(freq);
+  let m = 0;
+  for (let i = Math.max(0, b - 1); i <= Math.min(data.length - 1, b + 1); i++) m = Math.max(m, data[i]);
+  return toDb(m);
+}
+function noiseAt(freq) {
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  const hzPerBin = rxCtx.sampleRate / analyser.fftSize;
+  const vals = [];
+  for (let df = -1200; df <= 1200; df += Math.round(hzPerBin)) {
+    if (Math.abs(df) < 400) continue;
+    const b = binOf(freq + df);
+    if (b >= 0 && b < data.length) vals.push(data[b]);
+  }
+  return toDb(median(vals));
+}
+async function sampleFor(freq, seconds) {
+  const noises = [];
+  const steps = Math.round(seconds * 20);
+  for (let i = 0; i < steps; i++) { noises.push(noiseAt(freq)); await sleep(50); }
+  return median(noises);
+}
+$("micStart").onclick = async () => {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    rxCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (rxCtx.state === "suspended") rxCtx.resume();
+    const src = rxCtx.createMediaStreamSource(micStream);
+    analyser = rxCtx.createAnalyser();
+    analyser.fftSize = 8192;
+    analyser.smoothingTimeConstant = 0;
+    src.connect(analyser);
+    $("rxStatus").textContent = "マイク取得済み。サンプリング " + rxCtx.sampleRate + " Hz。";
+    $("measureBase").disabled = false;
+    $("recvOnce").disabled = false;
+    $("autoRecv").disabled = false;
+    $("micStart").disabled = true;
+    liveLoop();
+  } catch (e) {
+    $("rxStatus").textContent = "マイクが使えませんでした: " + e.message + "（https / localhost で開いているか確認してください）";
+  }
+};
+async function liveLoop() {
+  while (micStream) {
+    $("liveDb").textContent = band().toLocaleString() + " Hz: " + levelAt(band()) + " dB";
+    await sleep(120);
+  }
+}
+$("measureBase").onclick = async () => {
+  $("rxStatus").textContent = "周囲の静けさを測っています（1秒・音を鳴らさないでください）…";
+  for (const f of [f0(), band(), f1()]) baseline[f] = await sampleFor(f, 1);
+  $("rxStatus").textContent = "基準を測りました。ノイズ: " +
+    [f0(), band(), f1()].map(f => f.toLocaleString() + "Hz " + baseline[f] + "dB").join(" / ");
+};
+// Wait for preamble (centre tone), then its falling edge; returns fall time (ms, performance.now) or null.
+async function waitForPreamble(timeoutMs) {
+  const thr = (baseline[band()] !== undefined ? baseline[band()] : -70) + 12;
+  const t0 = performance.now();
+  let above = 0;
+  while (performance.now() - t0 < timeoutMs) {
+    if (levelAt(band()) > thr) { if (++above >= 2) break; }
+    else above = 0;
+    await sleep(50);
+  }
+  if (above < 2) return null;
+  // wait for the falling edge (preamble end, then 60ms gap before bit 0)
+  const t1 = performance.now();
+  let below = 0;
+  while (performance.now() - t1 < 1500) {
+    if (levelAt(band()) < thr) { if (++below >= 2) break; }
+    else below = 0;
+    await sleep(20);
+  }
+  if (below < 2) return null;
+  return performance.now();
+}
+async function decodeOneFrame(expectedSeq, timeoutMs) {
+  const fallAt = await waitForPreamble(timeoutMs);
+  if (fallAt === null) return { ok: false, reason: "タイムアウト（開始音なし）" };
+  const t0 = performance.now();
+  const bits = [];
+  for (let i = 0; i < 12; i++) {
+    const target = fallAt + GAP_MS + i * BIT_MS + BIT_MS / 2;
+    const wait = target - performance.now();
+    if (wait > 0) await sleep(wait);
+    // 3 readings around the sample point, take the max per tone
+    let l0 = -90, l1 = -90;
+    for (let k = 0; k < 3; k++) {
+      l0 = Math.max(l0, levelAt(f0()));
+      l1 = Math.max(l1, levelAt(f1()));
+      await sleep(8);
+    }
+    bits.push(l1 > l0 ? 1 : 0);
+  }
+  const d = decodeBits(bits);
+  const elapsed = Math.round(performance.now() - t0 + PREAMBLE_MS);
+  const ok = d.checksumOk && d.seq === expectedSeq;
+  return { ok, seq: d.seq, hand: d.hand, checksumOk: d.checksumOk, elapsed, bits };
+}
+function addResult(expectedSeq, r) {
+  const c = conds();
+  const entry = { time: nowTime(), seq: expectedSeq, ...c,
+    sentHand: "?", recvHand: r.hand !== undefined ? HANDS[r.hand] : "—",
+    checksum: r.checksumOk === undefined ? "—" : (r.checksumOk ? "合う" : "合わない"),
+    ok: r.ok, elapsed: r.elapsed !== undefined ? r.elapsed : null,
+    reason: r.reason || "" };
+  results.push(entry);
+  const tr = document.createElement("tr");
+  tr.innerHTML = "<td>" + entry.time + "</td><td>" + expectedSeq + "</td><td>" + c.band.toLocaleString() +
+    "</td><td>—</td><td>" + entry.recvHand + "</td><td>" + entry.checksum +
+    "</td><td class='" + (r.ok ? "ok" : "ng") + "'>" + (r.ok ? "成功" : "失敗" + (r.reason ? "（" + r.reason + "）" : "")) +
+    "</td><td>" + (entry.elapsed !== null ? entry.elapsed + " ms" : "—") + "</td>";
+  $("resultTable").querySelector("tbody").appendChild(tr);
+  updateSummary();
+}
+function updateSummary() {
+  const n = results.length;
+  const okN = results.filter(r => r.ok).length;
+  const times = results.filter(r => r.ok && r.elapsed !== null).map(r => r.elapsed).sort((a, b) => a - b);
+  let s = "試行 " + n + " 回中、成功 " + okN + " 回（初回成功率 " +
+    (n ? Math.round(okN / n * 1000) / 10 : 0) + "%）。";
+  if (times.length) {
+    const med = times[Math.floor(times.length / 2)];
+    s += " 成功フレームの所要時間 中央値 " + med + " ms。1戦分（4フレーム往復）の推定 " +
+      (med * 4) + " ms（目安 8,000 ms 以内）。";
+    s += (okN / n >= 0.95 && med * 4 <= 8000) ? " → この帯域は実用候補。" : " → 目安には未達。";
+  }
+  $("summary").textContent = s;
+}
+$("recvOnce").onclick = async () => {
+  $("rxStatus").textContent = "1フレームを待っています（最大8秒）…送信側で1回送ってください。";
+  const r = await decodeOneFrame(0, 8000);
+  if (r.ok === false && r.reason) {
+    $("rxStatus").textContent = "受信できませんでした: " + r.reason;
+    addResult(0, r);
+    return;
+  }
+  addResult(0, r);
+  $("rxStatus").textContent = "受信: 試行 " + r.seq + "・手 " + HANDS[r.hand] +
+    "・検査値" + (r.checksumOk ? "合う" : "合わない") + "・" + (r.ok ? "成功" : "失敗") + "・" + r.elapsed + " ms。";
+};
+$("autoRecv").onclick = async () => {
+  if (scanning) return;
+  scanning = true;
+  $("autoRecv").disabled = true;
+  if (baseline[band()] === undefined) {
+    $("rxStatus").textContent = "基準がまだ無いので、まず周囲の静けさを1秒測ります…";
+    for (const f of [f0(), band(), f1()]) baseline[f] = await sampleFor(f, 1);
+  }
+  for (let seq = 0; seq < TRIALS; seq++) {
+    $("rxStatus").textContent = "試行 " + (seq + 1) + " / " + TRIALS + " を待っています…送信側で自動送信を開始してください。";
+    const r = await decodeOneFrame(seq, 10000);
+    addResult(seq, r);
+    if (r.ok === false && r.reason) {
+      $("rxStatus").textContent = "試行 " + seq + ": " + r.reason + "。次の試行を待ちます。";
+    }
+  }
+  $("rxStatus").textContent = "自動受信完了（20試行）。結果表とまとめを確認してください。";
+  scanning = false;
+  $("autoRecv").disabled = false;
+};
+$("copyResults").onclick = async () => {
+  const head = "時刻,試行,帯域Hz,距離,置き方,音量,送信端末,受信端末,受信した手,検査値,成功,所要ms";
+  const lines = results.map(r => [r.time, r.seq, r.band, r.dist, r.place, r.vol, r.tx, r.rx,
+    r.recvHand, r.checksum, r.ok ? "成功" : "失敗", r.elapsed !== null ? r.elapsed : ""].join(","));
+  const text = [head, ...lines].join("\n") || "（結果なし）";
+  try { await navigator.clipboard.writeText(text); $("rxStatus").textContent = "結果をコピーしました。"; }
+  catch (e) { $("rxStatus").textContent = "コピーできませんでした: " + e.message; }
+};
+$("csvResults").onclick = () => {
+  const head = "時刻,試行,帯域Hz,距離,置き方,音量,送信端末,受信端末,受信した手,検査値,成功,所要ms";
+  const lines = results.map(r => [r.time, r.seq, r.band, r.dist, r.place, r.vol, r.tx, r.rx,
+    r.recvHand, r.checksum, r.ok ? "成功" : "失敗", r.elapsed !== null ? r.elapsed : ""].join(","));
+  const blob = new Blob([[head, ...lines].join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "stage1-frame-test.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("clearResults").onclick = () => {
+  results = [];
+  $("resultTable").querySelector("tbody").innerHTML = "";
+  updateSummary();
+};
+</script>
+</body>
+</html>
