@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四大元素ゲーム WebRTC実験 — QRで接続して手を送る</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; line-height: 1.6; color: #222; max-width: 760px; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  button { font-size: 15px; padding: 8px 14px; margin: 4px 4px 4px 0; border-radius: 6px; border: 1px solid #888; background: #f4f4f4; cursor: pointer; }
+  button.go { background: #2b6cb0; color: #fff; border-color: #2b6cb0; }
+  button.hand { font-size: 18px; padding: 10px 18px; }
+  textarea { width: 100%; box-sizing: border-box; font-size: 11px; }
+  .note { color: #555; font-size: 13px; }
+  #status { font-weight: bold; font-size: 17px; padding: 8px; background: #fff8dc; border: 1px solid #d8c95a; border-radius: 6px; }
+  #log { white-space: pre-wrap; font-size: 12.5px; background: #f7f7f7; border: 1px solid #ccc; border-radius: 6px; padding: 8px; min-height: 120px; }
+  .qrbox { margin: 8px 0; } .qrbox svg { width: 300px; height: 300px; image-rendering: pixelated; }
+  video { width: 100%; max-width: 420px; background: #000; border-radius: 6px; }
+  .big { font-size: 20px; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>四大元素ゲーム WebRTC実験 — QRで接続して手を送る</h1>
+<p>目的は2つだけ。<strong>QRの往復だけで端末同士の直接接続が開くか</strong>と、<strong>開いた後に手が何ミリ秒で往復するか</strong>を確かめる。ゲーム本体ではなく、通り道だけの実験台だ。</p>
+<p class="note">前提: 両端末とも同じ Wi-Fi（または片方のテザリング）につながっていること。中継サーバーは使わず、同じネットワーク内の直接接続だけを狙う設計にしている（接続情報が小さく保てる）。ページの読み込みと QR の表示・読み取りに、QR生成と読み取りの小さなライブラリを CDN から読み込む。実機ではまだ未検証の最初の一回だ。</p>
+
+<h2>手順</h2>
+<ol>
+  <li>両端末でこのページを開く。</li>
+  <li><strong>Main役</strong>の端末で「接続を作る」を押す。QRコードが出る。</li>
+  <li><strong>Sub役</strong>の端末で「相手のQRを読み取る」を押して、その QR を読む。続けて「応答を作る」を押すと、Sub側の QR が出る。</li>
+  <li>Main役の端末で「相手のQRを読み取る」を押して、Sub側の QR を読む。続けて「応答を取り込む」を押す。</li>
+  <li>数秒で「接続できました」になれば成功。そのまま下のテスト（手の送信・往復時間）が使える。</li>
+  <li>QR が読み取れないときは、下の文字列コードを何らかの方法で相手に渡して、貼り付けでも動く。</li>
+</ol>
+
+<div id="status">状態: まだ接続していません</div>
+
+<h2>Main役（接続を作る側）</h2>
+<button id="makeOffer" class="go">接続を作る</button>
+<div id="offerQr" class="qrbox"></div>
+<textarea id="offerCode" rows="3" readonly placeholder="ここに接続コード（文字列）が出ます"></textarea>
+<div id="answerSection" style="display:none">
+  <p>相手の応答コード:</p>
+  <textarea id="answerIn" rows="3" placeholder="相手の応答コードを貼るか、QRで読み取ります"></textarea>
+  <button id="scanAnswer">相手のQRを読み取る</button>
+  <button id="acceptAnswer" class="go">応答を取り込む</button>
+</div>
+
+<h2>Sub役（接続を受ける側）</h2>
+<textarea id="offerIn" rows="3" placeholder="相手の接続コードを貼るか、QRで読み取ります"></textarea>
+<button id="scanOffer">相手のQRを読み取る</button>
+<button id="acceptOffer" class="go">応答を作る</button>
+<div id="answerQr" class="qrbox"></div>
+<textarea id="answerCode" rows="3" readonly placeholder="ここに応答コード（文字列）が出ます"></textarea>
+
+<div id="camWrap" style="display:none">
+  <video id="cam" playsinline muted></video>
+  <button id="stopScan">読み取りをやめる</button>
+</div>
+
+<div id="testPanel" style="display:none">
+  <h2>接続後のテスト</h2>
+  <p>手を送る: 
+    <button class="hand" data-hand="火">火</button>
+    <button class="hand" data-hand="水">水</button>
+    <button class="hand" data-hand="地">地</button>
+    <button class="hand" data-hand="風">風</button>
+  </p>
+  <p>自分の手: <span id="myHand" class="big">—</span> ／ 相手の手: <span id="peerHand" class="big">—</span></p>
+  <button id="pingOnce">往復時間を1回測る</button>
+  <button id="pingTen">往復時間を10回測る</button>
+  <button id="pingMedian">往復時間の中央値を出す</button>
+</div>
+
+<h2>記録</h2>
+<pre id="log"></pre>
+<button id="copyLog">記録をコピーする</button>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let pc = null, dc = null;
+const pings = [];
+
+function log(msg) {
+  const el = $("log");
+  el.textContent += "[" + new Date().toLocaleTimeString("ja-JP") + "] " + msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+function setStatus(s) { $("status").textContent = "状態: " + s; }
+
+// ---- connection code packing (JSON -> gzip -> base64url) ----
+async function gzipBytes(bytes) {
+  if (!("CompressionStream" in window)) return null;
+  try {
+    const cs = new CompressionStream("gzip");
+    const buf = await new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer();
+    return new Uint8Array(buf);
+  } catch (e) { return null; }
+}
+async function gunzipBytes(bytes) {
+  const ds = new DecompressionStream("gzip");
+  const buf = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+  return new Uint8Array(buf);
+}
+function b64urlEncode(bytes) {
+  let s = "";
+  bytes.forEach(b => s += String.fromCharCode(b));
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64urlDecode(str) {
+  str = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (str.length % 4) str += "=";
+  const s = atob(str);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+async function pack(desc) {
+  const raw = new TextEncoder().encode(JSON.stringify({ t: desc.type, s: desc.sdp }));
+  const gz = await gzipBytes(raw);
+  if (gz && gz.length < raw.length) return "G" + b64urlEncode(gz);
+  return "R" + b64urlEncode(raw);
+}
+async function unpack(code) {
+  code = code.trim();
+  const mode = code.charAt(0);
+  const bytes = b64urlDecode(code.slice(1));
+  const raw = (mode === "G") ? await gunzipBytes(bytes) : bytes;
+  const obj = JSON.parse(new TextDecoder().decode(raw));
+  return { type: obj.t, sdp: obj.s };
+}
+function waitIce() {
+  return new Promise(res => {
+    if (pc.iceGatheringState === "complete") return res();
+    const to = setTimeout(res, 6000);
+    pc.addEventListener("icegatheringstatechange", () => {
+      if (pc.iceGatheringState === "complete") { clearTimeout(to); res(); }
+    });
+  });
+}
+function showCode(textId, qrId, code) {
+  $(textId).value = code;
+  try {
+    const qr = qrcode(0, "L");
+    qr.addData(code);
+    qr.make();
+    $(qrId).innerHTML = qr.createSvgTag(3, 6);
+    log("コード " + code.length + " 文字 / QRの一辺のマス数 " + qr.getModuleCount());
+  } catch (e) {
+    $(qrId).innerHTML = "";
+    log("QR化に失敗しました: " + e.message + "（文字列コードを使ってください）");
+  }
+}
+
+// ---- data channel ----
+function setupDc() {
+  dc.onopen = async () => {
+    setStatus("接続できました");
+    $("testPanel").style.display = "block";
+    log("通り道が開きました。手の送信と往復時間の測定ができます。");
+    try {
+      const stats = await pc.getStats();
+      const types = [];
+      stats.forEach(r => {
+        if (r.type === "local-candidate") types.push("自分:" + r.candidateType);
+        if (r.type === "remote-candidate") types.push("相手:" + r.candidateType);
+      });
+      if (types.length) log("住所候補の種類: " + types.join(" / "));
+    } catch (e) { /* stats are best-effort */ }
+  };
+  dc.onclose = () => { setStatus("切断されました"); log("通り道が閉じました。"); };
+  dc.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.kind === "ping") dc.send(JSON.stringify({ kind: "pong", t: m.t }));
+    else if (m.kind === "pong") {
+      const rtt = Math.round(performance.now() - m.t);
+      pings.push(rtt);
+      log("往復 " + rtt + " ms");
+    } else if (m.kind === "elem") {
+      $("peerHand").textContent = m.hand;
+      log("相手の手が届きました: " + m.hand);
+    }
+  };
+}
+function newPc() {
+  const p = new RTCPeerConnection({ iceServers: [] });
+  p.onconnectionstatechange = () => log("接続の状態: " + p.connectionState);
+  return p;
+}
+
+// ---- Main side ----
+$("makeOffer").onclick = async () => {
+  try {
+    pc = newPc();
+    dc = pc.createDataChannel("game");
+    setupDc();
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitIce();
+    const code = await pack(pc.localDescription);
+    showCode("offerCode", "offerQr", code);
+    $("answerSection").style.display = "block";
+    setStatus("相手の応答を待っています");
+    log("接続情報を作りました。相手に QR を見せてください。");
+  } catch (e) { log("接続情報の作成に失敗: " + e.message); }
+};
+$("acceptAnswer").onclick = async () => {
+  const code = $("answerIn").value;
+  if (!code) { log("応答コードが空です。"); return; }
+  try {
+    await pc.setRemoteDescription(await unpack(code));
+    setStatus("応答を受け付けました。接続を待っています…");
+    log("応答を取り込みました。");
+  } catch (e) { log("応答の取り込みに失敗: " + e.message); }
+};
+
+// ---- Sub side ----
+$("acceptOffer").onclick = async () => {
+  const code = $("offerIn").value;
+  if (!code) { log("接続コードが空です。"); return; }
+  try {
+    pc = newPc();
+    pc.ondatachannel = e => { dc = e.channel; setupDc(); };
+    await pc.setRemoteDescription(await unpack(code));
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    await waitIce();
+    const out = await pack(pc.localDescription);
+    showCode("answerCode", "answerQr", out);
+    setStatus("応答を作りました。相手に読み取ってもらってください");
+    log("応答を作りました。相手に QR を見せてください。");
+  } catch (e) { log("応答の作成に失敗: " + e.message); }
+};
+
+// ---- QR scanning ----
+let scanStream = null, scanTarget = null, scanning = false;
+async function startScan(inputId) {
+  scanTarget = inputId;
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  } catch (e) { log("カメラが使えません: " + e.message); return; }
+  const v = $("cam");
+  v.srcObject = scanStream;
+  await v.play();
+  $("camWrap").style.display = "block";
+  scanning = true;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const tick = () => {
+    if (!scanning) return;
+    if (v.readyState === v.HAVE_ENOUGH_DATA) {
+      canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+      ctx.drawImage(v, 0, 0);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const res = jsQR(img.data, img.width, img.height);
+      if (res && res.data) {
+        $(scanTarget).value = res.data;
+        log("QRを読み取りました（" + res.data.length + " 文字）。");
+        stopScan();
+        return;
+      }
+    }
+    setTimeout(() => requestAnimationFrame(tick), 120);
+  };
+  tick();
+}
+function stopScan() {
+  scanning = false;
+  if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+  $("camWrap").style.display = "none";
+}
+$("scanOffer").onclick = () => startScan("offerIn");
+$("scanAnswer").onclick = () => startScan("answerIn");
+$("stopScan").onclick = stopScan;
+
+// ---- tests after connect ----
+document.querySelectorAll("button.hand").forEach(b => {
+  b.onclick = () => {
+    if (!dc || dc.readyState !== "open") { log("まだ接続できていません。"); return; }
+    dc.send(JSON.stringify({ kind: "elem", hand: b.dataset.hand }));
+    $("myHand").textContent = b.dataset.hand;
+    log("自分の手を送りました: " + b.dataset.hand);
+  };
+});
+function sendPing() {
+  if (!dc || dc.readyState !== "open") { log("まだ接続できていません。"); return; }
+  dc.send(JSON.stringify({ kind: "ping", t: performance.now() }));
+}
+$("pingOnce").onclick = sendPing;
+$("pingTen").onclick = async () => {
+  for (let i = 0; i < 10; i++) { sendPing(); await new Promise(r => setTimeout(r, 200)); }
+};
+$("pingMedian").onclick = () => {
+  if (!pings.length) { log("まだ往復時間の記録がありません。"); return; }
+  const s = [...pings].sort((a, b) => a - b);
+  log("往復時間 " + s.length + " 回分 / 中央値 " + s[Math.floor(s.length / 2)] + " ms / 最小 " + s[0] + " ms / 最大 " + s[s.length - 1] + " ms");
+};
+$("copyLog").onclick = async () => {
+  try { await navigator.clipboard.writeText($("log").textContent); log("記録をコピーしました。"); }
+  catch (e) { log("コピーに失敗: " + e.message); }
+};
+</script>
+</body>
+</html>
