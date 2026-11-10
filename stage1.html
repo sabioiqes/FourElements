@@ -38,7 +38,7 @@
   <li>両方の端末で、下の条件（帯域・距離・置き方・音量）と端末名を同じ値に合わせる。送る向き（どちらが送信側か）もここに記録する。段階0では向きが未記録だったので、今回は必ず書くこと。</li>
   <li>受信側で「マイク開始」を押し、許可する。続けて「周囲の静けさを測る」でノイズの基準を取る。</li>
   <li>受信側で「自動受信開始（20試行）」を押す（音を待つ状態になる）。</li>
-  <li>送信側で「自動送信開始（20試行）」を押す。1試行は約1.5秒のフレームで、20試行で約1分。</li>
+  <li>送信側で「自動送信開始（20試行）」を押す。1試行は約1.8秒のフレームで、20試行で約1分。</li>
   <li>受信側の結果表に、試行ごとの成功・失敗と所要時間が出る。判定の目安は、初回成功率 95%以上（20回中19回以上）かつ、1戦分（4フレームの往復）の推定が中央値で 8秒以内。</li>
   <li>1試行だけ確かめたいときは、手動テスト（送信で手を選んで1回送る→受信で「1フレーム待つ」）を使う。</li>
 </ol>
@@ -83,10 +83,10 @@
 <div class="card sender">
   <div>送る手（手動テスト用）：</div>
   <div id="handBtns"></div>
-  <button id="sendOnce" class="go">この手で1フレーム送る（約1.5秒）</button>
+  <button id="sendOnce" class="go">この手で1フレーム送る（約1.8秒）</button>
   <button id="autoSend" class="go">自動送信開始（20試行・約1分）</button>
   <div id="status"></div>
-  <p class="note">フレームの形: 開始音（中心周波数・0.4秒）→ 間隔 0.06秒 → 12ビットを2音FSKで送る（1ビット 0.08秒）。12ビットの中身は、試行番号 5ビット＋手 2ビット＋検査値 5ビット（全ビットを検査値が覆うので、1ビットの誤りは必ず検出できる）。2音は中心±400Hz（例: 18,500Hz なら 18,100Hz が 0、18,900Hz が 1）。終わりに中心周波数 0.12秒の終了音。</p>
+  <p class="note">フレームの形: 開始音（中心周波数・0.4秒）→ 間隔 0.06秒 → 12ビットを2音FSKで送る（1ビット 0.1秒）。12ビットの中身は、試行番号 5ビット＋手 2ビット＋検査値 5ビット（全ビットを検査値が覆うので、1ビットの誤りは必ず検出できる）。2音は中心±400Hz（例: 18,500Hz なら 18,100Hz が 0、18,900Hz が 1）。終わりに中心周波数 0.12秒の終了音。</p>
 </div>
 
 <h2>受信側</h2>
@@ -116,7 +116,7 @@
 // 12 bits: seq(5, MSB first) + hand(2) + checksum(5)
 // checksum = (seq * 3 ^ hand * 5 ^ 0x12) & 0x1F — covers every bit, so any single-bit flip is caught
 const HANDS = ["水", "火", "風", "地"];
-const BIT_MS = 80, PREAMBLE_MS = 400, GAP_MS = 60, END_MS = 120;
+const BIT_MS = 100, PREAMBLE_MS = 400, GAP_MS = 60, END_MS = 120;
 const TRIALS = 20;
 let selHand = 1; // 火
 let txCtx = null;
@@ -206,7 +206,7 @@ function sendFrame(seq, hand) {
 $("sendOnce").onclick = async () => {
   $("status").textContent = "送信中: 試行0・手 " + HANDS[selHand] + "（" + band().toLocaleString() + " Hz）";
   sendFrame(0, selHand);
-  await sleep(1700);
+  await sleep(2100);
   $("status").textContent = "送信しました。受信側の結果を確認してください。";
 };
 $("autoSend").onclick = async () => {
@@ -263,7 +263,7 @@ $("micStart").onclick = async () => {
     if (rxCtx.state === "suspended") rxCtx.resume();
     const src = rxCtx.createMediaStreamSource(micStream);
     analyser = rxCtx.createAnalyser();
-    analyser.fftSize = 8192;
+    analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0;
     src.connect(analyser);
     $("rxStatus").textContent = "マイク取得済み。サンプリング " + rxCtx.sampleRate + " Hz。";
@@ -289,16 +289,20 @@ $("measureBase").onclick = async () => {
     [f0(), band(), f1()].map(f => f.toLocaleString() + "Hz " + baseline[f] + "dB").join(" / ");
 };
 // Wait for preamble (centre tone), then its falling edge; returns fall time (ms, performance.now) or null.
+// The preamble must be sustained for at least 250ms: the 120ms end tone uses the same centre
+// frequency and must never be mistaken for a preamble (that produced phantom decodes in run 1).
 async function waitForPreamble(timeoutMs) {
   const thr = (baseline[band()] !== undefined ? baseline[band()] : -70) + 12;
   const t0 = performance.now();
-  let above = 0;
+  let aboveStart = null, sustained = false;
   while (performance.now() - t0 < timeoutMs) {
-    if (levelAt(band()) > thr) { if (++above >= 2) break; }
-    else above = 0;
-    await sleep(50);
+    if (levelAt(band()) > thr) {
+      if (aboveStart === null) aboveStart = performance.now();
+      else if (performance.now() - aboveStart >= 250) { sustained = true; break; }
+    } else aboveStart = null;
+    await sleep(25);
   }
-  if (above < 2) return null;
+  if (!sustained) return null;
   // wait for the falling edge (preamble end, then 60ms gap before bit 0)
   const t1 = performance.now();
   let below = 0;
