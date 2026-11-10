@@ -102,6 +102,7 @@
 
 <h2>結果</h2>
 <div id="summary">まだ結果はありません。</div>
+<pre id="debugLog" style="white-space:pre-wrap;font-size:12px;color:#555"></pre>
 <table id="resultTable">
   <thead><tr><th>時刻</th><th>試行</th><th>帯域</th><th>送信した手</th><th>受信した手</th><th>検査値</th><th>成功</th><th>所要時間</th></tr></thead>
   <tbody></tbody>
@@ -303,39 +304,48 @@ async function waitForPreamble(timeoutMs) {
     await sleep(25);
   }
   if (!sustained) return null;
-  // wait for the falling edge (preamble end, then 60ms gap before bit 0)
+  // wait for the falling edge (preamble end, then 60ms gap before bit 0);
+  // estimate the true fall time as the midpoint between the last above-threshold
+  // and the first below-threshold reading, to cancel analyser/polling lag.
   const t1 = performance.now();
-  let below = 0;
+  let below = 0, lastAbove = performance.now(), firstBelow = null;
   while (performance.now() - t1 < 1500) {
-    if (levelAt(band()) < thr) { if (++below >= 2) break; }
-    else below = 0;
-    await sleep(20);
+    if (levelAt(band()) < thr) {
+      if (firstBelow === null) firstBelow = performance.now();
+      if (++below >= 2) break;
+    } else { below = 0; firstBelow = null; lastAbove = performance.now(); }
+    await sleep(10);
   }
   if (below < 2) return null;
-  return performance.now();
+  return (lastAbove + firstBelow) / 2;
 }
 async function decodeOneFrame(expectedSeq, timeoutMs) {
   const fallAt = await waitForPreamble(timeoutMs);
   if (fallAt === null) return { ok: false, reason: "タイムアウト（開始音なし）" };
   const t0 = performance.now();
-  const bits = [];
+  const bits = [], levels = [];
   for (let i = 0; i < 12; i++) {
-    const target = fallAt + GAP_MS + i * BIT_MS + BIT_MS / 2;
-    const wait = target - performance.now();
-    if (wait > 0) await sleep(wait);
-    // 3 readings around the sample point, take the max per tone
-    let l0 = -90, l1 = -90;
-    for (let k = 0; k < 3; k++) {
-      l0 = Math.max(l0, levelAt(f0()));
-      l1 = Math.max(l1, levelAt(f1()));
-      await sleep(8);
+    // integrate each tone's energy over the bit window (centre +/-35ms) instead of
+    // point-sampling: a fixed sync offset then shifts weights, not the decision.
+    const wStart = fallAt + GAP_MS + i * BIT_MS + 15;
+    const wEnd = fallAt + GAP_MS + (i + 1) * BIT_MS - 15;
+    let s0 = 0, s1 = 0, n = 0;
+    while (performance.now() < wStart) await sleep(4);
+    while (performance.now() <= wEnd) {
+      s0 += Math.pow(10, levelAt(f0()) / 20);
+      s1 += Math.pow(10, levelAt(f1()) / 20);
+      n++;
+      await sleep(10);
     }
-    bits.push(l1 > l0 ? 1 : 0);
+    const a0 = Math.round(20 * Math.log10(s0 / Math.max(n, 1)));
+    const a1 = Math.round(20 * Math.log10(s1 / Math.max(n, 1)));
+    levels.push([a0, a1]);
+    bits.push(s1 > s0 ? 1 : 0);
   }
   const d = decodeBits(bits);
   const elapsed = Math.round(performance.now() - t0 + PREAMBLE_MS);
   const ok = d.checksumOk && d.seq === expectedSeq;
-  return { ok, seq: d.seq, hand: d.hand, checksumOk: d.checksumOk, elapsed, bits };
+  return { ok, seq: d.seq, hand: d.hand, checksumOk: d.checksumOk, elapsed, bits, levels };
 }
 function addResult(expectedSeq, r) {
   const c = conds();
@@ -343,8 +353,13 @@ function addResult(expectedSeq, r) {
     sentHand: "?", recvHand: r.hand !== undefined ? HANDS[r.hand] : "—",
     checksum: r.checksumOk === undefined ? "—" : (r.checksumOk ? "合う" : "合わない"),
     ok: r.ok, elapsed: r.elapsed !== undefined ? r.elapsed : null,
+    bits: r.bits ? r.bits.join("") : "", levels: r.levels || null,
     reason: r.reason || "" };
   results.push(entry);
+  if (r.bits) {
+    $("debugLog").textContent += "試行" + expectedSeq + " bits=" + entry.bits +
+      (r.levels ? " levels(0/1 dB)=" + r.levels.map(p => p[0] + "/" + p[1]).join(" ") : "") + "\n";
+  }
   const tr = document.createElement("tr");
   tr.innerHTML = "<td>" + entry.time + "</td><td>" + expectedSeq + "</td><td>" + c.band.toLocaleString() +
     "</td><td>—</td><td>" + entry.recvHand + "</td><td>" + entry.checksum +
@@ -402,8 +417,9 @@ $("autoRecv").onclick = async () => {
 $("copyResults").onclick = async () => {
   const head = "時刻,試行,帯域Hz,距離,置き方,音量,送信端末,受信端末,受信した手,検査値,成功,所要ms";
   const lines = results.map(r => [r.time, r.seq, r.band, r.dist, r.place, r.vol, r.tx, r.rx,
-    r.recvHand, r.checksum, r.ok ? "成功" : "失敗", r.elapsed !== null ? r.elapsed : ""].join(","));
-  const text = [head, ...lines].join("\n") || "（結果なし）";
+    r.recvHand, r.checksum, r.ok ? "成功" : "失敗", r.elapsed !== null ? r.elapsed : "", r.bits || ""].join(","));
+  const dbg = $("debugLog").textContent.trim();
+  const text = ([head + ",ビット列", ...lines].join("\n") || "（結果なし）") + (dbg ? "\n" + dbg : "");
   try { await navigator.clipboard.writeText(text); $("rxStatus").textContent = "結果をコピーしました。"; }
   catch (e) { $("rxStatus").textContent = "コピーできませんでした: " + e.message; }
 };
@@ -421,6 +437,7 @@ $("csvResults").onclick = () => {
 $("clearResults").onclick = () => {
   results = [];
   $("resultTable").querySelector("tbody").innerHTML = "";
+  $("debugLog").textContent = "";
   updateSummary();
 };
 </script>
