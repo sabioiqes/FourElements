@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四大元素ゲーム 音方式 段階0テスト — 帯域スキャン</title>
+<style>
+  body { font-family: sans-serif; max-width: 760px; margin: 0 auto; padding: 16px; line-height: 1.6; color: #222; }
+  h1 { font-size: 1.3em; }
+  h2 { font-size: 1.1em; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-top: 28px; }
+  .card { border: 1px solid #bbb; border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .sender { border-color: #2a7; }
+  .receiver { border-color: #27a; }
+  button { font-size: 1em; padding: 8px 12px; margin: 4px 4px 4px 0; border-radius: 6px; border: 1px solid #888; background: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #e8f4ff; border-color: #27a; }
+  button.go { background: #e6f7ec; border-color: #2a7; }
+  button.sel { background: #333; color: #fff; }
+  select, input { font-size: 1em; padding: 6px; margin: 2px 6px 2px 0; }
+  #bigFreq { font-size: 2.2em; font-weight: bold; text-align: center; margin: 8px 0; min-height: 1.4em; }
+  #status, #rxStatus { min-height: 1.5em; font-weight: bold; }
+  .meter { height: 18px; background: #eee; border-radius: 4px; overflow: hidden; margin: 6px 0; }
+  .meter > div { height: 100%; background: #27a; width: 0%; }
+  table { border-collapse: collapse; width: 100%; font-size: .9em; margin-top: 8px; }
+  th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: center; }
+  th { background: #f2f2f2; }
+  .ok { color: #0a7; font-weight: bold; }
+  .mid { color: #b80; font-weight: bold; }
+  .ng { color: #c33; font-weight: bold; }
+  .note { font-size: .9em; color: #555; }
+  ol li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<h1>四大元素ゲーム 音方式 段階0テスト — 帯域スキャン</h1>
+<p>実験計画 v0.1 の段階0。モデムを作る前に「どの帯域の音が、その端末の組で届くか」だけを純音で測る。同じファイルを2台の端末（または端末＋パソコン）で開き、片方を送信側、片方を受信側にする。</p>
+
+<h2>使い方</h2>
+<ol>
+  <li>両方の端末で、下の条件（距離・置き方・音量）を同じ値に合わせる。</li>
+  <li>受信側で「マイク開始」を押し、許可する。続けて「周囲の静けさを測る」でノイズの基準を取る。</li>
+  <li>受信側で「自動受信スキャン開始」を押す（音を待つ状態になる）。</li>
+  <li>送信側で「自動送信スキャン開始」を押す。6つの周波数が順に鳴る（約12秒）。</li>
+  <li>受信側の結果表に、周波数ごとの SNR（信号と雑音の差）が出る。15dB以上が「届く」の目安。</li>
+  <li>1周波数ずつ確かめたいときは、手動テスト（送信で1回鳴らす→受信で「この周波数を1秒測る」）を使う。</li>
+</ol>
+<p class="note">マイクを使うには https か localhost が必要。file:// で直接開くとマイクが使えないブラウザがある。その場合は <code>python3 -m http.server</code> で開くか、GitHub Pages / Vercel に置くこと。同じ端末1台で送信と受信を両方やる自己テストは、スピーカーとマイクが近すぎて正確な測定にならない。必ず2台で測ること。</p>
+
+<h2>条件（両端末で同じ値にする）</h2>
+<div class="card">
+  <label>距離
+    <select id="condDist">
+      <option value="0.5m">0.5m（机を挟んだ対戦の想定）</option>
+      <option value="1m">1m</option>
+      <option value="2m">2m</option>
+    </select>
+  </label>
+  <label>置き方
+    <select id="condPlace">
+      <option value="机に置く">机に置く</option>
+      <option value="手に持つ">手に持つ</option>
+    </select>
+  </label>
+  <label>音量
+    <select id="condVol">
+      <option value="50%">50%</option>
+      <option value="75%">75%</option>
+      <option value="100%" selected>100%</option>
+    </select>
+  </label>
+</div>
+
+<h2>送信側</h2>
+<div class="card sender">
+  <div>周波数：</div>
+  <div id="freqBtns"></div>
+  <div id="bigFreq">— Hz</div>
+  <button id="playOnce" class="go">この周波数で1回鳴らす（1.5秒）</button>
+  <button id="autoSend" class="go">自動送信スキャン開始（全6周波数・約12秒）</button>
+  <div id="status"></div>
+  <p class="note">鳴らす音は正弦波の純音。音量は上の条件の値を使う。自動走査は 2,000 → 16,500 → 17,500 → 18,500 → 19,200 → 20,000 Hz の順に、各1.5秒・間隔0.5秒で鳴らす。</p>
+</div>
+
+<h2>受信側</h2>
+<div class="card receiver">
+  <button id="micStart" class="primary">マイク開始</button>
+  <button id="measureBase" class="primary" disabled>周囲の静けさを測る（1秒）</button>
+  <button id="measureOne" class="primary" disabled>この周波数を1秒測る</button>
+  <button id="autoRecv" class="primary" disabled>自動受信スキャン開始（音を待って約13秒記録）</button>
+  <div id="rxStatus"></div>
+  <div>選択中の周波数のいまの強さ：<span id="liveDb">—</span></div>
+  <div class="meter"><div id="liveBar"></div></div>
+  <p class="note">ノイズ抑制などの自動加工は切って取得する（ブラウザが対応している範囲で）。表示の dB は端末内の相対値で、絶対音量ではない。判断に使うのは SNR（ピークとノイズの差）。</p>
+</div>
+
+<h2>結果</h2>
+<table id="resultTable">
+  <thead><tr><th>時刻</th><th>周波数</th><th>距離</th><th>置き方</th><th>音量</th><th>ピーク</th><th>ノイズ</th><th>SNR</th><th>判定（目安）</th></tr></thead>
+  <tbody></tbody>
+</table>
+<button id="copyResults">結果をテキストでコピー</button>
+<button id="csvResults">CSVで保存</button>
+<button id="clearResults">結果を消す</button>
+
+<h2>聞こえチェック（段階2の前倒し）</h2>
+<p class="note">ゲームで使う音量で、ユウト自身が各帯域を聞いてみる。子どもに聞こえるかの判断材料にする。耳の近くでは鳴らさないこと。</p>
+<div class="card">
+  <button id="hearPlay" class="go">選択中の周波数を1.5秒鳴らす</button>
+  <button id="hearYes">聞こえた</button>
+  <button id="hearNo">聞こえなかった</button>
+  <button id="hearAnnoy">聞こえて気になる</button>
+  <div id="hearLog"></div>
+</div>
+
+<script>
+"use strict";
+const FREQS = [2000, 16500, 17500, 18500, 19200, 20000];
+let selFreq = 18500;
+let txCtx = null;
+let rxCtx = null, analyser = null, micStream = null;
+let baseline = {}; // freq -> noise dB (median of ambient)
+let results = [];
+let hearLog = [];
+let scanning = false;
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const nowTime = () => new Date().toLocaleTimeString("ja-JP", {hour12: false});
+const toDb = v => v <= 0 ? -90 : Math.round(20 * Math.log10(v / 255) * 10) / 10;
+const median = a => { const s = [...a].sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
+
+// ---- frequency buttons ----
+const freqDiv = $("freqBtns");
+FREQS.forEach(f => {
+  const b = document.createElement("button");
+  b.textContent = f.toLocaleString() + " Hz";
+  b.dataset.f = f;
+  b.onclick = () => { selFreq = f; refreshFreqBtns(); $("bigFreq").textContent = f.toLocaleString() + " Hz"; };
+  freqDiv.appendChild(b);
+});
+function refreshFreqBtns() {
+  [...freqDiv.children].forEach(b => b.classList.toggle("sel", +b.dataset.f === selFreq));
+}
+refreshFreqBtns();
+$("bigFreq").textContent = selFreq.toLocaleString() + " Hz";
+
+function condVol() { return parseInt($("condVol").value, 10) / 100; }
+function conds() { return { dist: $("condDist").value, place: $("condPlace").value, vol: $("condVol").value }; }
+
+// ---- sender ----
+function ensureTx() {
+  if (!txCtx) txCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (txCtx.state === "suspended") txCtx.resume();
+  return txCtx;
+}
+function playTone(freq, durSec, vol) {
+  const ctx = ensureTx();
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  const t = ctx.currentTime;
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.05);
+  g.gain.setValueAtTime(vol, t + durSec - 0.1);
+  g.gain.linearRampToValueAtTime(0, t + durSec);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t);
+  osc.stop(t + durSec + 0.05);
+}
+$("playOnce").onclick = async () => {
+  $("status").textContent = selFreq.toLocaleString() + " Hz を鳴らしています…";
+  playTone(selFreq, 1.5, condVol());
+  await sleep(1600);
+  $("status").textContent = "鳴らし終わりました。受信側で測ってください。";
+};
+$("autoSend").onclick = async () => {
+  if (scanning) return;
+  scanning = true;
+  $("autoSend").disabled = true; $("playOnce").disabled = true;
+  for (const f of FREQS) {
+    selFreq = f; refreshFreqBtns();
+    $("bigFreq").textContent = f.toLocaleString() + " Hz";
+    $("status").textContent = "送信中: " + f.toLocaleString() + " Hz";
+    playTone(f, 1.5, condVol());
+    await sleep(2000);
+  }
+  $("status").textContent = "送信スキャン完了。受信側の結果表を確認してください。";
+  $("bigFreq").textContent = "完了";
+  scanning = false;
+  $("autoSend").disabled = false; $("playOnce").disabled = false;
+};
+
+// ---- receiver ----
+function binOf(freq) {
+  return Math.round(freq * analyser.fftSize / rxCtx.sampleRate);
+}
+function levelAt(freq) {
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  const b = binOf(freq);
+  let m = 0;
+  for (let i = Math.max(0, b - 1); i <= Math.min(data.length - 1, b + 1); i++) m = Math.max(m, data[i]);
+  return toDb(m);
+}
+function noiseAt(freq) {
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  const hzPerBin = rxCtx.sampleRate / analyser.fftSize;
+  const vals = [];
+  for (let df = -1200; df <= 1200; df += Math.round(hzPerBin)) {
+    if (Math.abs(df) < 400) continue;
+    const b = binOf(freq + df);
+    if (b >= 0 && b < data.length) vals.push(data[b]);
+  }
+  return toDb(median(vals));
+}
+async function sampleFor(freq, seconds, mode) {
+  // mode: "peak" -> max level; "noise" -> median noise
+  const levels = [], noises = [];
+  const steps = Math.round(seconds * 20);
+  for (let i = 0; i < steps; i++) {
+    levels.push(levelAt(freq));
+    noises.push(noiseAt(freq));
+    await sleep(50);
+  }
+  return { peak: Math.max(...levels), noise: median(noises) };
+}
+$("micStart").onclick = async () => {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    rxCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (rxCtx.state === "suspended") rxCtx.resume();
+    const src = rxCtx.createMediaStreamSource(micStream);
+    analyser = rxCtx.createAnalyser();
+    analyser.fftSize = 8192;
+    analyser.smoothingTimeConstant = 0;
+    src.connect(analyser);
+    $("rxStatus").textContent = "マイク取得済み。サンプリング " + rxCtx.sampleRate + " Hz。";
+    $("measureBase").disabled = false;
+    $("measureOne").disabled = false;
+    $("autoRecv").disabled = false;
+    $("micStart").disabled = true;
+    liveLoop();
+  } catch (e) {
+    $("rxStatus").textContent = "マイクが使えませんでした: " + e.message + "（https / localhost で開いているか確認してください）";
+  }
+};
+async function liveLoop() {
+  while (micStream) {
+    const db = levelAt(selFreq);
+    $("liveDb").textContent = selFreq.toLocaleString() + " Hz: " + db + " dB";
+    $("liveBar").style.width = Math.max(0, Math.min(100, (db + 90) / 90 * 100)) + "%";
+    await sleep(120);
+  }
+}
+$("measureBase").onclick = async () => {
+  $("rxStatus").textContent = "周囲の静けさを測っています（1秒・音を鳴らさないでください）…";
+  for (const f of FREQS) {
+    const r = await sampleFor(f, 1, "noise");
+    baseline[f] = r.noise;
+  }
+  $("rxStatus").textContent = "基準を測りました。各周波数のノイズ: " +
+    FREQS.map(f => f.toLocaleString() + "Hz " + baseline[f] + "dB").join(" / ");
+};
+function verdict(snr) {
+  if (snr >= 15) return { t: "届く", c: "ok" };
+  if (snr >= 8) return { t: "境界", c: "mid" };
+  return { t: "届かない", c: "ng" };
+}
+function addResult(freq, peak, noise, snr) {
+  const c = conds();
+  const v = verdict(snr);
+  results.push({ time: nowTime(), freq, ...c, peak, noise, snr, judge: v.t });
+  const tr = document.createElement("tr");
+  tr.innerHTML = "<td>" + nowTime() + "</td><td>" + freq.toLocaleString() + "</td><td>" + c.dist +
+    "</td><td>" + c.place + "</td><td>" + c.vol + "</td><td>" + peak + "</td><td>" + noise +
+    "</td><td>" + snr + "</td><td class='" + v.c + "'>" + v.t + "</td>";
+  $("resultTable").querySelector("tbody").appendChild(tr);
+}
+$("measureOne").onclick = async () => {
+  $("rxStatus").textContent = selFreq.toLocaleString() + " Hz を1秒測っています…";
+  const r = await sampleFor(selFreq, 1, "peak");
+  const noise = baseline[selFreq] !== undefined ? baseline[selFreq] : r.noise;
+  const snr = Math.round((r.peak - noise) * 10) / 10;
+  addResult(selFreq, r.peak, noise, snr);
+  $("rxStatus").textContent = selFreq.toLocaleString() + " Hz: ピーク " + r.peak + " dB、ノイズ " + noise +
+    " dB、SNR " + snr + " dB（" + verdict(snr).t + "）。";
+};
+$("autoRecv").onclick = async () => {
+  if (scanning) return;
+  scanning = true;
+  $("autoRecv").disabled = true;
+  if (Object.keys(baseline).length === 0) {
+    $("rxStatus").textContent = "基準がまだ無いので、まず周囲の静けさを1秒測ります…";
+    for (const f of FREQS) baseline[f] = (await sampleFor(f, 1, "noise")).noise;
+  }
+  $("rxStatus").textContent = "音を待っています…送信側で自動送信スキャンを開始してください（最大20秒待ちます）。";
+  let triggered = false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 20000) {
+    if (FREQS.some(f => levelAt(f) > baseline[f] + 10)) { triggered = true; break; }
+    await sleep(100);
+  }
+  if (!triggered) {
+    $("rxStatus").textContent = "20秒待っても音が検出できませんでした。音量・距離・マイク許可を確認して、もう一度試してください。";
+    scanning = false; $("autoRecv").disabled = false;
+    return;
+  }
+  $("rxStatus").textContent = "音を検出。13秒間記録します…";
+  const peaks = {};
+  FREQS.forEach(f => peaks[f] = -90);
+  const t1 = Date.now();
+  while (Date.now() - t1 < 13000) {
+    for (const f of FREQS) peaks[f] = Math.max(peaks[f], levelAt(f));
+    await sleep(50);
+  }
+  for (const f of FREQS) {
+    const snr = Math.round((peaks[f] - baseline[f]) * 10) / 10;
+    addResult(f, peaks[f], baseline[f], snr);
+  }
+  $("rxStatus").textContent = "受信スキャン完了。結果表を確認してください。";
+  scanning = false; $("autoRecv").disabled = false;
+};
+$("copyResults").onclick = async () => {
+  const head = "時刻,周波数Hz,距離,置き方,音量,ピークdB,ノイズdB,SNRdB,判定";
+  const lines = results.map(r => [r.time, r.freq, r.dist, r.place, r.vol, r.peak, r.noise, r.snr, r.judge].join(","));
+  const text = [head, ...lines].join("\n") || "（結果なし）";
+  try { await navigator.clipboard.writeText(text); $("rxStatus").textContent = "結果をコピーしました。"; }
+  catch (e) { $("rxStatus").textContent = "コピーできませんでした: " + e.message; }
+};
+$("csvResults").onclick = () => {
+  const head = "時刻,周波数Hz,距離,置き方,音量,ピークdB,ノイズdB,SNRdB,判定";
+  const lines = results.map(r => [r.time, r.freq, r.dist, r.place, r.vol, r.peak, r.noise, r.snr, r.judge].join(","));
+  const blob = new Blob([[head, ...lines].join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "stage0-band-scan.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("clearResults").onclick = () => {
+  results = [];
+  $("resultTable").querySelector("tbody").innerHTML = "";
+};
+
+// ---- hearing check (stage 2 prep) ----
+$("hearPlay").onclick = async () => {
+  playTone(selFreq, 1.5, condVol());
+};
+function hearLogAdd(kind) {
+  hearLog.push({ time: nowTime(), freq: selFreq, vol: $("condVol").value, kind });
+  const d = document.createElement("div");
+  d.textContent = nowTime() + " " + selFreq.toLocaleString() + " Hz（" + $("condVol").value + "）: " + kind;
+  $("hearLog").appendChild(d);
+}
+$("hearYes").onclick = () => hearLogAdd("聞こえた");
+$("hearNo").onclick = () => hearLogAdd("聞こえなかった");
+$("hearAnnoy").onclick = () => hearLogAdd("聞こえて気になる");
+</script>
+</body>
+</html>
