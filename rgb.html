@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RGBコード 可変サイズ版</title>
+    <style>
+      body { font-family: sans-serif; padding: 20px; max-width: 640px; margin: auto; }
+      h2 { font-size: 1.1rem; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+      .view { display: none; }
+      .view.active { display: block; }
+      textarea { width: 100%; height: 90px; padding: 8px; font-size: 1rem; box-sizing: border-box; }
+      canvas { border: 1px solid #ccc; margin-top: 10px; max-width: 100%; image-rendering: pixelated; }
+      .btn { padding: 8px 16px; background: #007bff; color: #fff; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; margin: 0 5px 5px 0; }
+      .btn-secondary { background: #6c757d; }
+      .btn-danger { background: #dc3545; }
+      .result-box { margin-top: 12px; padding: 10px; background: #f8f9fa; border-left: 4px solid #007bff; word-break: break-all; }
+      .error { border-left-color: #dc3545; color: #dc3545; }
+      .camera-wrapper { position: relative; width: 100%; max-width: 360px; background: #000; margin-top: 10px; }
+      video { width: 100%; display: block; }
+      .guide-frame { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 3px solid rgba(0, 255, 100, 0.9); border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35); }
+      small { color: #555; }
+    </style>
+  </head>
+  <body>
+    <h1>RGBコード 可変サイズ版</h1>
+    <div>
+      <button class="btn" id="tab-gen">コード生成</button>
+      <button class="btn btn-secondary" id="tab-scan">読取</button>
+    </div>
+
+    <div id="view-gen" class="view active">
+      <h2>文字列 → コード(サイズ自動)</h2>
+      <textarea id="input-text">HelloWorld_123456789 こんにちは 4D hide-and-seek</textarea>
+      <button class="btn" id="gen-btn">生成する</button>
+      <button class="btn btn-secondary" id="download-btn" style="display: none">画像を保存</button>
+      <br />
+      <canvas id="gen-canvas" width="280" height="280"></canvas>
+      <div id="gen-info" class="result-box" style="display: none"></div>
+      <p><small id="cap-table"></small></p>
+    </div>
+
+    <div id="view-scan" class="view">
+      <h2>カメラ / 画像から読取</h2>
+      <p><small>緑の枠にコードをほぼ合わせてください(向きは自由)。画像ファイルは「画像を保存」で出力したPNGを想定しています。</small></p>
+      <button class="btn" id="start-camera-btn">カメラ起動</button>
+      <button class="btn btn-danger" id="stop-camera-btn" style="display: none">カメラ停止</button>
+      <div id="camera-container" class="camera-wrapper" style="display: none">
+        <video id="video-preview" autoplay playsinline muted></video>
+        <div class="guide-frame" id="guide-frame"></div>
+      </div>
+      <p><input type="file" id="file-input" accept="image/*" /></p>
+      <canvas id="scan-canvas" style="display: none"></canvas>
+      <div id="scan-result" class="result-box" style="display: none"></div>
+    </div>
+
+    <script src="./rgbcore.js"></script>
+    <script src="./rgb-ui.js"></script>
+  </body>
+</html>
